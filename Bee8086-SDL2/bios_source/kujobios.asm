@@ -2,6 +2,8 @@
 ; Copyright 2021 BueniaDev (buenia.mbemu@gmail.com)
 ;
 ; Revision 1.00
+;
+; This work is licensed under the GNU GPL v3. See included LICENSE file.
 
 	cpu	8086
 

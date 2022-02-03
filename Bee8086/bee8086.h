@@ -1,6 +1,6 @@
 /*
     This file is part of the Bee8086 engine.
-    Copyright (C) 2021 BueniaDev.
+    Copyright (C) 2022 BueniaDev.
 
     Bee8086 is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
