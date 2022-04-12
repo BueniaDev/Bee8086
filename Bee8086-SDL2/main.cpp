@@ -6,7 +6,10 @@
 #include <SDL2/SDL.h>
 #include <Bee8086/bee8086.h>
 #include "beefloppy.h"
+#include "beemda.h"
+#include "mda_rom.inl"
 using namespace bee8086;
+using namespace beemda;
 using namespace std;
 
 class SDL2Frontend : public Bee8086Interface
@@ -24,7 +27,7 @@ class SDL2Frontend : public Bee8086Interface
 
 	void printusage()
 	{
-	    cout << "Usage: example [floppy image]" << endl;
+	    cout << "Usage: example [floppy image] ([BIOS])" << endl;
 	}
 
 	bool init()
@@ -44,7 +47,7 @@ class SDL2Frontend : public Bee8086Interface
 	    memory.resize(0x100000, 0);
 
 	    core.setinterface(this);
-	    core.init(0xF000, 0x100);
+	    core.init(bios_entry.cs_val, bios_entry.ip_val);
 
 	    if (SDL_Init(SDL_INIT_VIDEO) < 0)
 	    {
@@ -105,6 +108,18 @@ class SDL2Frontend : public Bee8086Interface
 
 	    floppy_name = argv[1];
 
+	    if (argc > 2)
+	    {
+		bios_name = argv[2];
+		bios_entry = pcxt;
+	    }
+	    else
+	    {
+		bios_name = "kujobios.bin";
+		bios_entry = kujo;
+		use_custom_bios = true;
+	    }
+
 	    return true;
 	}
 
@@ -117,17 +132,17 @@ class SDL2Frontend : public Bee8086Interface
 		return false;
 	    }
 
-	    if (biostemp.size() > 0x8000)
+	    if (biostemp.size() > bios_entry.size)
 	    {
 		cout << "Error: BIOS size mismatch" << endl;
 		return false;
 	    }
 
-	    bios.resize(0x8000, 0);
+	    bios.resize(bios_entry.size, 0);
 
 	    for (size_t index = 0; index < biostemp.size(); index++)
 	    {
-		bios[(0x100 + index)] = biostemp[index];
+		bios[(bios_entry.offs + index)] = biostemp[index];
 	    }
 
 	    biostemp.clear();
@@ -155,78 +170,76 @@ class SDL2Frontend : public Bee8086Interface
 
 	uint8_t readByte(uint32_t addr)
 	{
-	    uint8_t temp = 0;
+	    uint8_t data = 0;
 
-	    if (addr < 0xF0000)
+	    if (inRangeAddr(addr, bios_entry.addr, bios_entry.size))
 	    {
-		temp = memory[addr];
-	    }
-	    else if (addr < 0xF8000)
-	    {
-		temp = bios[(addr & 0xFFFF)];
-	    }
-	    else if (addr < 0xFFFF0)
-	    {
-		temp = memory[addr];
+		data = bios.at((addr - bios_entry.addr));
 	    }
 	    else
 	    {
-		temp = biosdata[(addr & 0xF)];
+		data = memory.at(addr);
 	    }
 
-	    return temp;
+	    return data;
 	}
 
-	void writeByte(uint32_t addr, uint8_t val)
+	void writeByte(uint32_t addr, uint8_t data)
 	{
-	    if (addr < 0xF0000)
-	    {
-		memory[addr] = val;
-	    }
-	    else if (addr < 0xF8000)
+	    if (inRangeAddr(addr, bios_entry.addr, bios_entry.size))
 	    {
 		return;
 	    }
-	    else if (addr < 0xFFFF0)
-	    {
-		memory[addr] = val;
-	    }
 	    else
 	    {
-		biosdata[(addr & 0xF)] = val;
+		memory.at(addr) = data;
 	    }
 	}
 
 	uint8_t portIn(uint16_t port)
 	{
-	    uint16_t temp = 0;
-	    cout << "Reading from port of " << hex << (int)(port) << endl;
-	    exit(0);
-	    return temp;
+	    uint8_t data = 0;
+
+	    switch (port)
+	    {
+		default:
+		{
+		    cout << "Reading from port of " << hex << (int)(port) << endl;
+		    exit(0);
+		}
+		break;
+	    }
+
+
+	    return data;
 	}
 
-	void portOut(uint16_t port, uint8_t val)
+	void portOut(uint16_t port, uint8_t data)
 	{
 	    switch (port)
 	    {
+		case 0x063: break;
+		case 0x0A0: break;
+		case 0x3B8: mono_display.writeControl(data); break;
+		case 0x3D8: break;
 		case 0x4F8:
 		{
 		    is_unimp_int = true;
-		    int_num = val;
+		    int_num = data;
 		}
 		break;
 		case 0x4F9:
 		{
 		    if (is_unimp_int == true)
 		    {
-			cout << "Unimplemented interrupt of " << hex << int(int_num) << ", service number of " << hex << int(val) << endl;
+			cout << "Unimplemented interrupt of " << hex << int(int_num) << ", service number of " << hex << int(data) << endl;
 			exit(1);
 		    }
 		}
 		break;
 		default:
 		{
-		    cout << "Writing to port of " << hex << (int)(port) << ", value of " << hex << (int)(val) << endl;
+		    cout << "Writing to port of " << hex << (int)(port) << ", value of " << hex << (int)(data) << endl;
 		    exit(0);
 		}
 		break;
@@ -235,7 +248,7 @@ class SDL2Frontend : public Bee8086Interface
 
 	bool isInterruptOverride(uint8_t int_num)
 	{
-	    return (int_num == 0x13);
+	    return ((int_num == 0x13) | use_custom_bios);
 	}
 
 	void interruptOverride(Bee8086 &state, uint8_t int_num)
@@ -244,10 +257,29 @@ class SDL2Frontend : public Bee8086Interface
 
 	    switch (int_num)
 	    {
+		case 0x10:
+		{
+		    switch (service_num)
+		    {
+			default:
+			{
+			    cout << "Unrecognized int 10h service number of " << hex << int(service_num) << endl;
+			    exit(1);
+			}
+			break;
+		    }
+		}
+		break;
 		case 0x13:
 		{
 		    switch (service_num)
 		    {
+			case 0:
+			{
+			    state.set_ah(0);
+			    state.set_cf(false);
+			}
+			break;
 			case 2:
 			{
 			    size_t num_sectors = state.get_al();
@@ -300,6 +332,7 @@ class SDL2Frontend : public Bee8086Interface
 
 			    state.set_ah(0);
 			    state.set_al(num_sectors_read);
+			    state.set_cf(false);
 			}
 			break;
 			default:
@@ -346,23 +379,59 @@ class SDL2Frontend : public Bee8086Interface
 	}
 
     private:
+	template<typename T>
+	bool testbit(T reg, int bit)
+	{
+	    return ((reg >> bit) & 1) ? true : false;
+	}
+
+	template<typename T>
+	bool inRange(T addr, int low, int high)
+	{
+	    int value = int(addr);
+	    return ((addr >= low) && (addr < high));
+	}
+
+	template<typename T>
+	bool inRangeAddr(T addr, int start, int size)
+	{
+	    return inRange(addr, start, (start + size));
+	}
+
 	vector<uint8_t> memory;
 	vector<uint8_t> bios;
 	array<uint8_t, 0x10> biosdata;
 
-	string bios_name = "kujobios.bin";
+	string bios_name = "";
 	string floppy_name = "";
 
 	Bee8086 core;
 
 	BeeFloppy disk_a;
+	BeeMDA mono_display;
 
 	SDL_Window *window = NULL;
 	SDL_Surface *surface = NULL;
 
+	struct biosentry
+	{
+	    uint32_t addr = 0;
+	    uint32_t offs = 0;
+	    uint32_t size = 0;
+	    uint16_t cs_val = 0;
+	    uint16_t ip_val = 0;
+	};
+
+	biosentry pcxt = {0xFE000, 0, 0x2000, 0xFFFF, 0};
+	biosentry kujo = {0xF0000, 0x100, 0x8000, 0xF000, 0x0100};
+
+	biosentry bios_entry;
+
 	bool is_unimp_int = false;
 	uint8_t int_num = 0;
 	uint8_t service_num = 0;
+
+	bool use_custom_bios = false;
 };
 
 int main(int argc, char *argv[])

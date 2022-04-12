@@ -1,6 +1,25 @@
+auto add_internal_byte(uint8_t source, uint8_t operand) -> uint8_t
+{
+    uint8_t result = (source + operand);
+    set_sign(testbit(result, 7));
+    set_zero(result == 0);
+    set_carry((source + operand) > 0xFF);
+    return result;
+}
+
+auto add_internal_word(uint16_t source, uint16_t operand) -> uint16_t
+{
+    uint16_t result = (source + operand);
+    set_sign(testbit(result, 15));
+    set_zero(result == 0);
+    set_carry((source + operand) > 0xFFFF);
+    return result;
+}
+
 auto sub_internal_byte(uint8_t source, uint8_t operand) -> uint8_t
 {
     uint8_t result = (source - operand);
+    set_sign(testbit(result, 7));
     set_zero(result == 0);
     set_carry(operand > source);
     return result;
@@ -9,6 +28,16 @@ auto sub_internal_byte(uint8_t source, uint8_t operand) -> uint8_t
 auto and_internal_byte(uint8_t source, uint8_t operand) -> uint8_t
 {
     uint8_t result = (source & operand);
+    set_sign(testbit(result, 7));
+    set_zero(result == 0);
+    set_carry(false);
+    return result;
+}
+
+auto or_internal_byte(uint8_t source, uint8_t operand) -> uint8_t
+{
+    uint8_t result = (source & operand);
+    set_sign(testbit(result, 7));
     set_zero(result == 0);
     set_carry(false);
     return result;
@@ -17,17 +46,68 @@ auto and_internal_byte(uint8_t source, uint8_t operand) -> uint8_t
 auto shl_internal_byte(uint8_t source, uint8_t shift_amount) -> uint8_t
 {
     shift_amount &= 0x1F;
-    uint16_t result = (source << shift_amount);
-    set_carry(testbit(result, 8));
-    set_zero((result & 0xFF) == 0);
-    return uint8_t(result);
+    set_carry(testbit(source, 7));
+    uint8_t result = (source << shift_amount);
+    set_sign(testbit(result, 7));
+    set_zero(result == 0);
+    return result;
+}
+
+auto shr_internal_byte(uint8_t source, uint8_t shift_amount) -> uint8_t
+{
+    shift_amount &= 0x1F;
+    set_carry(testbit(source, 0));
+    uint8_t result = (source >> shift_amount);
+    set_sign(testbit(result, 7));
+    set_zero(result == 0);
+    return result;
+}
+
+auto inc_internal_byte(uint8_t source) -> uint8_t
+{
+    uint8_t result = (source + 1);
+    set_sign(testbit(result, 7));
+    set_zero(result == 0);
+    return result;
+}
+
+auto dec_internal_byte(uint8_t source) -> uint8_t
+{
+    uint8_t result = (source - 1);
+    set_sign(testbit(result, 7));
+    set_zero(result == 0);
+    return result;
 }
 
 auto inc_internal_word(uint16_t source) -> uint16_t
 {
     uint16_t result = (source + 1);
+    set_sign(testbit(result, 15));
     set_zero(result == 0);
     return result;
+}
+
+auto dec_internal_word(uint16_t source) -> uint16_t
+{
+    uint16_t result = (source - 1);
+    set_sign(testbit(result, 15));
+    set_zero(result == 0);
+    return result;
+}
+
+auto add_byte(uint8_t source, uint8_t operand) -> uint8_t
+{
+    return add_internal_byte(source, operand);
+}
+
+auto add_word(uint16_t source, uint16_t operand) -> uint16_t
+{
+    return add_internal_word(source, operand);
+}
+
+auto adc_byte(uint8_t source, uint8_t operand) -> uint8_t
+{
+    return add_internal_byte(source, (operand + is_carry()));
 }
 
 auto cmp_byte(uint8_t source, uint8_t operand) -> void
@@ -45,14 +125,39 @@ auto and_byte(uint8_t source, uint8_t operand) -> uint8_t
     return and_internal_byte(source, operand);
 }
 
+auto or_byte(uint8_t source, uint8_t operand) -> uint8_t
+{
+    return or_internal_byte(source, operand);
+}
+
 auto shl_byte(uint8_t source, uint8_t shift_amount) -> uint8_t
 {
     return shl_internal_byte(source, shift_amount);
 }
 
+auto shr_byte(uint8_t source, uint8_t shift_amount) -> uint8_t
+{
+    return shr_internal_byte(source, shift_amount);
+}
+
+auto inc_byte(uint8_t source) -> uint8_t
+{
+    return inc_internal_byte(source);
+}
+
+auto dec_byte(uint8_t source) -> uint8_t
+{
+    return dec_internal_byte(source);
+}
+
 auto inc_word(uint16_t source) -> uint16_t
 {
     return inc_internal_word(source);
+}
+
+auto dec_word(uint16_t source) -> uint16_t
+{
+    return dec_internal_word(source);
 }
 
 auto jumpShort(bool cond = true) -> int
@@ -92,6 +197,98 @@ auto jumpFar() -> int
     return 15;
 }
 
+auto loopCond(bool cond = true) -> int
+{
+    int8_t offs = getimmByte();
+
+    cx.setreg(cx.getreg() - 1);
+
+    bool branch = ((cx.getreg() != 0) && cond);
+
+    int cycles = 0;
+
+    if (!branch)
+    {
+	cycles = 4;
+    }
+    else
+    {
+	ip += offs;
+	cycles = 8;
+    }
+
+    return cycles;
+}
+
+auto storeFlagsAcc() -> int
+{
+    status_reg = ((status_reg & 0xFF00) | ax.gethi());
+    return 4;
+}
+
+auto loadAccFlags() -> int
+{
+    ax.sethi((status_reg & 0xFF));
+    return 4;
+}
+
+auto addMemReg() -> int
+{
+    uint8_t mod_rm = getimmByte();
+    int mod_cycles = decodeModRM(mod_rm);
+
+    setMem(add_byte(getMem(), getReg()));
+
+    if (current_mod_rm.mod == 3)
+    {
+	mod_cycles += 3;
+    }
+    else
+    {
+	mod_cycles += 16;
+    }
+
+    return mod_cycles;
+}
+
+auto addMemReg16() -> int
+{
+    uint8_t mod_rm = getimmByte();
+    int mod_cycles = decodeModRM(mod_rm);
+
+    setMem16(add_word(getMem16(), getReg16()));
+
+    if (current_mod_rm.mod == 3)
+    {
+	mod_cycles += 3;
+    }
+    else
+    {
+	mod_cycles += 16;
+    }
+
+    return mod_cycles;
+}
+
+auto moveMemSeg16() -> int
+{
+    uint8_t mod_rm = getimmByte();
+    int mod_cycles = decodeModRM(mod_rm);
+
+    setMem16(getSeg(current_mod_rm.reg));
+
+    if (current_mod_rm.mod == 3)
+    {
+	mod_cycles += 2;
+    }
+    else
+    {
+	mod_cycles += 9;
+    }
+
+    return mod_cycles;
+}
+
 auto moveSegMem16() -> int
 {
     uint8_t mod_rm = getimmByte();
@@ -105,8 +302,7 @@ auto moveSegMem16() -> int
     }
     else
     {
-	cout << "Memory segment cycles" << endl;
-	exit(0);
+	mod_cycles += 8;
     }
 
     return mod_cycles;
@@ -117,7 +313,7 @@ auto moveRegMem() -> int
     uint8_t mod_rm = getimmByte();
     int mod_cycles = decodeModRM(mod_rm);
 
-    setReg(current_mod_rm.reg, getMem());
+    setReg(getMem());
 
     if (current_mod_rm.mod == 3)
     {
@@ -136,7 +332,7 @@ auto moveMemReg() -> int
     uint8_t mod_rm = getimmByte();
     int mod_cycles = decodeModRM(mod_rm);
 
-    setMem(getReg(current_mod_rm.reg));
+    setMem(getReg());
 
     if (current_mod_rm.mod == 3)
     {
@@ -155,7 +351,7 @@ auto moveMemReg16() -> int
     uint8_t mod_rm = getimmByte();
     int mod_cycles = decodeModRM(mod_rm);
 
-    setMem16(getReg16(current_mod_rm.reg));
+    setMem16(getReg16());
 
     if (current_mod_rm.mod == 3)
     {
@@ -174,7 +370,7 @@ auto moveRegMem16() -> int
     uint8_t mod_rm = getimmByte();
     int mod_cycles = decodeModRM(mod_rm);
 
-    setReg16(current_mod_rm.reg, getMem16());
+    setReg16(getMem16());
 
     if (current_mod_rm.mod == 3)
     {
@@ -188,13 +384,41 @@ auto moveRegMem16() -> int
     return mod_cycles;
 };
 
+auto moveAccMem() -> int
+{
+    uint16_t addr = getimmWord();
+    ax.setlo(readByte(getSegment(1), addr));
+    return 10;
+}
+
+auto moveMemAcc() -> int
+{
+    uint16_t addr = getimmWord();
+    writeByte(getSegment(1), addr, ax.getlo());
+    return 10;
+}
+
+auto moveAccMem16() -> int
+{
+    uint16_t addr = getimmWord();
+    ax.setreg(readWord(getSegment(1), addr));
+    return 10;
+}
+
+auto moveMemAcc16() -> int
+{
+    uint16_t addr = getimmWord();
+    writeWord(getSegment(1), addr, ax.getreg());
+    return 10;
+}
+
 auto testMemReg() -> int
 {
     uint8_t mod_rm = getimmByte();
     int mod_cycles = decodeModRM(mod_rm);
 
     uint8_t mem_val = getMem();
-    uint8_t reg_val = getReg(current_mod_rm.reg);
+    uint8_t reg_val = getReg();
 
     test_byte(mem_val, reg_val);
 
@@ -213,13 +437,13 @@ auto testMemReg() -> int
 auto pushSeg(int index) -> int
 {
     sp -= 2;
-    writeWord(convertSeg(ss, sp), getSeg(index));
+    writeWord(ss, sp, getSeg(index));
     return 10;
 }
 
 auto popSeg(int index) -> int
 {
-    uint16_t data = readWord(convertSeg(ss, sp));
+    uint16_t data = readWord(ss, sp);
     sp += 2;
     setSeg(index, data);
     return 8;
@@ -228,13 +452,13 @@ auto popSeg(int index) -> int
 auto pushReg(uint16_t val) -> int
 {
     sp -= 2;
-    writeWord(convertSeg(ss, sp), val);
+    writeWord(ss, sp, val);
     return 11;
 }
 
 auto popReg(uint16_t &reg) -> int
 {
-    uint16_t data = readWord(convertSeg(ss, sp));
+    uint16_t data = readWord(ss, sp);
     sp += 2;
     reg = data;
     return 8;
@@ -242,7 +466,7 @@ auto popReg(uint16_t &reg) -> int
 
 auto popReg(Bee8086Register &reg) -> int
 {
-    uint16_t data = readWord(convertSeg(ss, sp));
+    uint16_t data = readWord(ss, sp);
     sp += 2;
     reg.setreg(data);
     return 8;
@@ -250,7 +474,7 @@ auto popReg(Bee8086Register &reg) -> int
 
 auto popFlags() -> int
 {
-    uint16_t data = readWord(convertSeg(ss, sp));
+    uint16_t data = readWord(ss, sp);
     sp += 2;
     status_reg = data;
     return 8;
@@ -261,8 +485,8 @@ auto moveStringByte() -> int
 {
     if (!is_rep || cx.getreg() > 0)
     {
-	uint8_t str_byte = readByte(convertSeg(getSegment(1), si));
-	writeByte(convertSeg(es, di), str_byte);
+	uint8_t str_byte = readByte(getSegment(1), si);
+	writeByte(es, di, str_byte);
 
 	if (is_direction())
 	{
@@ -298,7 +522,7 @@ auto storeStringWord() -> int
 {
     if (!is_rep || cx.getreg() > 0)
     {
-	writeWord(convertSeg(es, di), ax.getreg());
+	writeWord(es, di, ax.getreg());
 
 	if (is_direction())
 	{
@@ -352,6 +576,27 @@ auto group1MemImm(bool sign = false) -> int
 
     switch (current_mod_rm.reg)
     {
+	case 0:
+	{
+	    setMem(add_byte(memory, imm));
+	    cycles_reg = 4;
+	    cycles_mem = 17;
+	}
+	break;
+	case 1:
+	{
+	    setMem(or_byte(memory, imm));
+	    cycles_reg = 4;
+	    cycles_mem = 17;
+	}
+	break;
+	case 2:
+	{
+	    setMem(adc_byte(memory, imm));
+	    cycles_reg = 4;
+	    cycles_mem = 17;
+	}
+	break;
 	case 4:
 	{
 	    setMem(and_byte(memory, imm));
@@ -368,7 +613,7 @@ auto group1MemImm(bool sign = false) -> int
 	break;
 	default:
 	{
-	    cout << "Unrecognized register number of " << dec << int(current_mod_rm.reg) << endl;
+	    cout << "Unrecognized group 1 register number of " << dec << int(current_mod_rm.reg) << endl;
 	    exit(1);
 	}
 	break;
@@ -386,28 +631,69 @@ auto group1MemImm(bool sign = false) -> int
     return mod_cycles;
 }
 
-auto group2Mem(uint8_t offs = 1) -> int
+auto group2Mem(bool is_constant = true, uint8_t val = 0) -> int
 {
+    uint8_t offs = (is_constant) ? 1 : val;
+
     uint8_t mod_rm = getimmByte();
     int mod_cycles = decodeModRM(mod_rm);
 
     uint8_t memory = getMem();
+
+    int cycles_reg = (is_constant) ? 2 : 12;
+    int cycles_mem = (is_constant) ? 12 : 24;
+
+    switch (current_mod_rm.reg)
+    {
+	case 4: setMem(shl_byte(memory, offs)); break;
+	case 5: setMem(shr_byte(memory, offs)); break;
+	default:
+	{
+	    cout << "Unrecognized group 2 register number of " << dec << int(current_mod_rm.reg) << endl;
+	    exit(1);
+	}
+	break;
+    }
+
+    if (current_mod_rm.mod == 3)
+    {
+	mod_cycles += cycles_reg;
+    }
+    else
+    {
+	mod_cycles += cycles_mem;
+    }
+
+    return mod_cycles;
+}
+
+auto group4Mem() -> int
+{
+    uint8_t mod_rm = getimmByte();
+    int mod_cycles = decodeModRM(mod_rm);
 
     int cycles_reg = 0;
     int cycles_mem = 0;
 
     switch (current_mod_rm.reg)
     {
-	case 4:
+	case 0:
 	{
-	    setMem(shl_byte(memory, offs));
-	    cycles_reg = 12;
-	    cycles_mem = 24;
+	    setMem(inc_byte(getMem()));
+	    cycles_reg = 3;
+	    cycles_mem = 15;
+	}
+	break;
+	case 1:
+	{
+	    setMem(dec_byte(getMem()));
+	    cycles_reg = 3;
+	    cycles_mem = 15;
 	}
 	break;
 	default:
 	{
-	    cout << "Unrecognized register number of " << dec << int(current_mod_rm.reg) << endl;
+	    cout << "Unrecognized group 4 register number of " << dec << int(current_mod_rm.reg) << endl;
 	    exit(1);
 	}
 	break;
@@ -435,6 +721,20 @@ auto group5Mem() -> int
 
     switch (current_mod_rm.reg)
     {
+	case 0:
+	{
+	    setMem16(inc_word(getMem16()));
+	    cycles_reg = 3;
+	    cycles_mem = 15;
+	}
+	break;
+	case 1:
+	{
+	    setMem16(dec_word(getMem16()));
+	    cycles_reg = 3;
+	    cycles_mem = 15;
+	}
+	break;
 	case 4:
 	{
 	    ip = getMem16();
@@ -444,7 +744,7 @@ auto group5Mem() -> int
 	break;
 	default:
 	{
-	    cout << "Unrecognized register number of " << dec << int(current_mod_rm.reg) << endl;
+	    cout << "Unrecognized group 5 register number of " << dec << int(current_mod_rm.reg) << endl;
 	    exit(1);
 	}
 	break;
@@ -488,9 +788,10 @@ auto intRet() -> int
     return 24;
 }
 
-auto getReg(int reg) -> uint8_t
+auto getReg() -> uint8_t
 {
     uint8_t data = 0;
+    int reg = current_mod_rm.reg;
     reg &= 7;
 
     switch (reg)
@@ -508,8 +809,9 @@ auto getReg(int reg) -> uint8_t
     return data;
 };
 
-auto setReg(int reg, uint8_t data) -> void
+auto setReg(uint8_t data) -> void
 {
+    int reg = current_mod_rm.reg;
     reg &= 7;
 
     switch (reg)
@@ -531,9 +833,10 @@ auto setReg(int reg, uint8_t data) -> void
     }
 }
 
-auto getReg16(int reg) -> uint16_t
+auto getReg16() -> uint16_t
 {
     uint16_t data = 0;
+    int reg = current_mod_rm.reg;
     reg &= 7;
 
     switch (reg)
@@ -557,8 +860,9 @@ auto getReg16(int reg) -> uint16_t
     return data;
 }
 
-auto setReg16(int reg, uint16_t data) -> void
+auto setReg16(uint16_t data) -> void
 {
+    int reg = current_mod_rm.reg;
     reg &= 7;
 
     switch (reg)
@@ -586,8 +890,9 @@ auto getMem(uint32_t offs = 0) -> uint8_t
 
     if (current_mod_rm.mod != 3)
     {
-	uint32_t addr = convertSeg(current_mod_rm.segment, current_mod_rm.addr);
-	temp = readByte((addr + offs));
+	uint16_t seg = current_mod_rm.segment;
+	uint16_t addr = current_mod_rm.addr;
+	temp = readByte(seg, (addr + offs));
     }
     else
     {
@@ -617,8 +922,9 @@ auto setMem(uint8_t data) -> void
 {
     if (current_mod_rm.mod != 3)
     {
-	uint32_t addr = convertSeg(current_mod_rm.segment, current_mod_rm.addr);
-	writeByte(addr, data);
+	uint16_t seg = current_mod_rm.segment;
+	uint16_t addr = current_mod_rm.addr;
+	writeByte(seg, addr, data);
     }
     else
     {
@@ -648,8 +954,9 @@ auto getMem16(uint32_t offs = 0) -> uint16_t
 
     if (current_mod_rm.mod != 3)
     {
-	uint32_t addr = convertSeg(current_mod_rm.segment, current_mod_rm.addr);
-	temp = readWord((addr + offs));
+	uint16_t seg = current_mod_rm.segment;
+	uint16_t addr = current_mod_rm.addr;
+	temp = readWord(seg, (addr + offs));
     }
     else
     {
@@ -679,8 +986,9 @@ auto setMem16(uint16_t data) -> void
 {
     if (current_mod_rm.mod != 3)
     {
-	uint32_t addr = convertSeg(current_mod_rm.segment, current_mod_rm.addr);
-	writeWord(addr, data);
+	uint16_t seg = current_mod_rm.segment;
+	uint16_t addr = current_mod_rm.addr;
+	writeWord(seg, addr, data);
     }
     else
     {
@@ -816,6 +1124,20 @@ auto decodeModRM(uint8_t byte) -> int
 	{
 	    switch (mem)
 	    {
+		case 4:
+		{
+		    segment = getSegment(1);
+		    addr = si;
+		    num_cycles = 5;
+		}
+		break;
+		case 5:
+		{
+		    segment = getSegment(1);
+		    addr = di;
+		    num_cycles = 5;
+		}
+		break;
 		case 6:
 		{
 		    segment = getSegment(2);

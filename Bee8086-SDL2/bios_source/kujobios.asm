@@ -1,7 +1,7 @@
 ; KujoBIOS - source code for BueniaDev's custom Intel 8086 BIOS. Compiles with NASM.
-; Copyright 2021 BueniaDev (buenia.mbemu@gmail.com)
+; Copyright 2022 BueniaDev (buenia.mbemu@gmail.com)
 ;
-; Revision 1.00
+; Revision 1.00 (alpha)
 ;
 ; This work is licensed under the GNU GPL v3. See included LICENSE file.
 
@@ -150,43 +150,12 @@ video_funcs	dw int10_unk
 		dw int10_unk
 		dw int10_unk
 		dw int10_unk
-		dw int10_handler_14
+		dw int10_unk
 		dw int10_unk
 
 int10_unk:
 	mov al, 0x10
 	int 3
-
-int10_handler_14:
-	mov bl, [ds:62h]
-	shl bl, 1
-	mov bh, 0
-	mov dx, [bx + 50h]
-	mov bl, [ss:bp + 2]
-	cmp bl, 0x7
-	je bell
-	cmp bl, 0x8
-	je backspace
-	cmp bl, 0xA
-	je line_feed
-	cmp bl, 0xD
-	je carriage_return
-	jmp print_char
-
-bell:
-	ret
-
-backspace:
-	ret
-
-line_feed:
-	ret
-
-carriage_return:
-	ret
-
-print_char:
-	ret
 
 int10:
 	cld

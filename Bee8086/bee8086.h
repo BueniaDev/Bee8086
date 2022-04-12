@@ -125,6 +125,7 @@ namespace bee8086
 
 	    void set_ah(uint8_t val);
 	    void set_al(uint8_t val);
+	    void set_cf(bool val);
 
 	    // Fetches contents of segment registers and IP
 	    uint16_t get_cs();
@@ -201,13 +202,18 @@ namespace bee8086
 
 	    // Reads byte from memory
 	    uint8_t readByte(uint32_t addr);
+	    uint8_t readByte(uint16_t seg, uint16_t offs);
 	    // Writes byte to memory
 	    void writeByte(uint32_t addr, uint8_t val);
+	    void writeByte(uint16_t seg, uint16_t offs, uint8_t val);
+
 
 	    // Reads 16-bit word from memory
 	    uint16_t readWord(uint32_t addr);
+	    uint16_t readWord(uint16_t seg, uint16_t offs);
 	    // Writes 16-bit word to memory
 	    void writeWord(uint32_t addr, uint16_t val);
+	    void writeWord(uint16_t seg, uint16_t offs, uint16_t val);
 
 	    // Fetches next byte from memory (and updates the program counter)
 	    uint8_t getimmByte();
@@ -252,6 +258,46 @@ namespace bee8086
 	    ModRM current_mod_rm;
 	    ModRMDasm dasm_mod_rm;
 
+	    bool is_overflow()
+	    {
+		return testbit(status_reg, 11);
+	    }
+
+	    void set_overflow(bool val)
+	    {
+		status_reg = changebit(status_reg, 11, val);
+	    }
+
+	    bool is_direction()
+	    {
+		return testbit(status_reg, 10);
+	    }
+
+	    void set_direction(bool val)
+	    {
+		status_reg = changebit(status_reg, 10, val);
+	    }
+
+	    bool is_irq()
+	    {
+		return testbit(status_reg, 9);
+	    }
+
+	    void set_irq(bool val)
+	    {
+		status_reg = changebit(status_reg, 9, val);
+	    }
+
+	    bool is_sign()
+	    {
+		return testbit(status_reg, 7);
+	    }
+
+	    void set_sign(bool val)
+	    {
+		status_reg = changebit(status_reg, 7, val);
+	    }
+
 	    bool is_zero()
 	    {
 		return testbit(status_reg, 6);
@@ -260,6 +306,16 @@ namespace bee8086
 	    void set_zero(bool val)
 	    {
 		status_reg = changebit(status_reg, 6, val);
+	    }
+
+	    bool is_parity()
+	    {
+		return testbit(status_reg, 2);
+	    }
+
+	    void set_parity(bool val)
+	    {
+		status_reg = changebit(status_reg, 2, val);
 	    }
 
 	    bool is_carry()
@@ -272,19 +328,19 @@ namespace bee8086
 		status_reg = changebit(status_reg, 0, val);
 	    }
 
-	    bool is_above()
+	    bool is_below_or_equal()
 	    {
-		return (!is_zero() && !is_carry());
+		return (is_zero() || is_carry());
 	    }
 
-	    bool is_direction()
+	    bool is_less_than()
 	    {
-		return testbit(status_reg, 10);
+		return ((is_sign() != is_overflow()) && !is_zero());
 	    }
 
-	    void set_direction(bool val)
+	    bool is_less_than_or_equal()
 	    {
-		status_reg = changebit(status_reg, 10, val);
+		return ((is_sign() != is_overflow()) || is_zero());
 	    }
 
 	    // Helper enum for memory segmentation
